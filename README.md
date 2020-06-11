@@ -16,6 +16,11 @@ This is an implementation of the paper:
   year={2019}
 }
 ```
+## Thanks
+
+This is an fork repository of [mfas](https://github.com/juanmanpr/mfas) with custom configuration. Thank you very much juanmanpr for your contribution.
+
+
 
 ## Usage
 
@@ -36,9 +41,14 @@ python main_found_ntu.py --datadir ../../Data/NTU --checkpointdir ../../Data/NTU
 
 Of course, set your own Data and Checkpoints directories.
 
+## What's new
+
+I extend the repo to finish the experiment on another dataset named AVMNIST. 
+The file `avmnist_gen.py` is used to generate the avmnist dataset using [FSDD](https://github.com/Jakobovski/free-spoken-digit-dataset) and [ESC-50](https://github.com/karolpiczak/ESC-50).
+`train_image.py` and `train_audio.py` are used to train the simple uni-modal classification models that take place of the feature extrator in MFAS.
+Then, you can use the file `main_searchable_avmnist.py` to search new fusion neural model architectures and file `main_found_avmnist.py` can used to evaluate the candidates.
+
 ## Download the pretrained checkpoints
 
 We provide pretrained backbones for RGB and skeleton modalities as well as some pretrained found architectures in here: [Google Drive link](https://drive.google.com/open?id=1wcIepkmCf2NRfnhXVdoNu6wSxkpZmMNm)
-
-
 
