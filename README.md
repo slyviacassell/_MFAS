@@ -18,7 +18,7 @@ This is an implementation of the paper:
 ```
 ## Thanks
 
-This is an fork repository of [mfas](https://github.com/juanmanpr/mfas) with custom configuration. Thank you very much juanmanpr for your contribution.
+This is an fork repository of [mfas](https://github.com/juanmanpr/mfas) with custom extension. Thank you very much juanmanpr for your contribution.
 
 
 
