@@ -49,10 +49,11 @@ def mnist_gen(root_path='./raw_data/mnist', img_saving_path='./avmnist/image', l
                 data = np.frombuffer(f.read(), np.uint8).reshape(num, height, width)
 
                 # PCA projecting with 75% energy removing
-                n_comp = int(height * width * 0.25)
+                n_comp = int(height * width)
                 pca = PCA(n_components=n_comp)
                 projected = pca.fit_transform(data.reshape(num, height * width))
-                rec = np.matmul(projected, pca.components_)
+                n_comp = ((np.cumsum(pca.explained_variance_ratio_) > 0.25) != 0).argmax()
+                rec = np.matmul(projected[:, :n_comp], pca.components_[:n_comp])
 
                 saved_path = os.path.join(working_dir, img_saving_path)
                 if not os.path.exists(saved_path):
@@ -84,11 +85,11 @@ def wav_to_spectrogram(audio_dir, file_name, noise_path, f_length, t_length, noi
     print(noise_path)
 
     audio_path = os.path.join(audio_dir, file_name)
-    # y, sr = librosa.load(audio_path, sr=None)
-    # y1, sr1 = librosa.load(noise_path, sr=None)
+    y, sr = librosa.load(audio_path, sr=None)
+    y1, sr1 = librosa.load(noise_path, sr=None)
 
-    sr, y = wav.read(audio_path)
-    sr1, y1 = wav.read(noise_path)
+    # sr, y = wav.read(audio_path)
+    # sr1, y1 = wav.read(noise_path)
 
     # t_length = len(t) == (len(samples) - time_seg_length) / (time_seg_length - noverlap)
     min_seg_length = int(np.ceil(len(y) / t_length))
@@ -112,33 +113,56 @@ def wav_to_spectrogram(audio_dir, file_name, noise_path, f_length, t_length, noi
 
     # using the min sample rate
     if sr1 > sr:
-        # y1 = librosa.resample(y1, sr1, sr)
+        y1 = librosa.resample(y1, sr1, sr)
 
-        s = np.ceil(len(y1) / float(sr1) * sr).astype(np.int)
-        y1 = signal.resample(y1, s)
+        # s = np.ceil(len(y1) / float(sr1) * sr).astype(np.int)
+        # y1 = signal.resample(y1, s)
     else:
-        # y = librosa.resample(y, sr, sr1)
+        y = librosa.resample(y, sr, sr1)
 
-        s = np.ceil(len(y) / float(sr) * sr1).astype(np.int)
-        y = signal.resample(y, s)
+        # s = np.ceil(len(y) / float(sr) * sr1).astype(np.int)
+        # y = signal.resample(y, s)
 
+    # maybe no zero padding
+    # z = np.zeros(np.abs(len(y1) - len(y)), dtype=np.float32)
     if len(y) < len(y1):
         samples = y + noise_power * y1[:len(y)]
     else:
         samples = y[:len(y1)] + noise_power * y1
 
     # nperseg controls the resolution of the time segment
-    # nfft control the length of FFT used, in other word, it controls the resolution of the frequency
-    f, t, Sxx = signal.spectrogram(samples, window=('boxcar'), nperseg=time_seg_length,
-                                   fs=min(sr, sr1), noverlap=noverlap, nfft=nfft)
+    # nfft control the length of FFT used, if  in other word, it controls the resolution of the frequency
+    # f, t, Sxx = signal.spectrogram(samples, window=('hann'), nperseg=time_seg_length,
+    #                                fs=min(sr, sr1), noverlap=noverlap, nfft=nfft)
 
-    if len(f) != f_length or len(t) != t_length:
+    # there is differences between these two spectrogram api,
+    # i.e, NFFT and pad_to for plt and nperseg and nfft for signal, see docs for more details
+    # https://matplotlib.org/api/_as_gen/matplotlib.pyplot.specgram.html#matplotlib.pyplot.specgram
+    # https://docs.scipy.org/doc/scipy/reference/generated/scipy.signal.spectrogram.html#scipy.signal.spectrogram
+    fig, ax = plt.subplots(1)
+    fig.subplots_adjust(left=0, right=1, bottom=0, top=1)
+    ax.axis('off')
+    pxx, freqs, bins, _ = ax.specgram(x=samples,
+                                      NFFT=time_seg_length, pad_to=nfft, noverlap=noverlap, Fs=min(sr, sr1),
+                                      cmap='Greys')
+    fig.canvas.draw()
+    size_inches = fig.get_size_inches()
+    dpi = fig.get_dpi()
+    width, height = fig.get_size_inches() * fig.get_dpi()
+    mplimage = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
+    # print("MPLImage Shape: ", np.shape(mplimage))
+    imarray = np.reshape(mplimage, (int(height), int(width), 3))
+    plt.close(fig)
+
+    # if len(f) != f_length or len(t) != t_length:
+    if len(bins) != t_length and len(freqs) != f_length:
         print('fucked')
         exit(1)
 
     with lck:
         print(idx_cnt)
-        output['data'].append(Sxx)
+        # choose one channel of greys
+        output['data'].append(imarray[:, :, 0])
         idx_cnt.value += 1
 
 
@@ -167,11 +191,59 @@ def dir_to_spectrogram(audio_dir, saving_dir, noise_dir, labels_dir, num_process
         print('No .wav file in %s' % wav_dir)
         exit(1)
 
+    # set the size of the spectrogarm to (112, 112)
+    plt.rcParams['figure.figsize'] = [1.12, 1.12]
+    plt.rcParams['figure.dpi'] = 100
     noise_names = get_noise_names(noise_dir)
 
-    # 4 speakers and 50 wav files of each digit per speaker
-    speakers = ['jackson', 'nicolas', 'theo', 'yweweler']
-    test_speaker = speakers[-1]
+    # # 4 speakers and 50 wav files of each digit per speaker
+    # speakers = ['jackson', 'nicolas', 'theo', 'yweweler']
+    # test_speaker = speakers[-1]
+    #
+    # # 50 noise files
+    # train_noise_names = noise_names[:40]
+    # test_noise_names = noise_names[-10:]
+    #
+    # train_category = {str(i): list() for i in range(10)}
+    # test_category = {str(i): list() for i in range(10)}
+    # for file_name in file_names:
+    #     if test_speaker in file_name:
+    #         test_category[file_name[0]].append(file_name)
+    #     else:
+    #         train_category[file_name[0]].append(file_name)
+    #
+    # train_labels = np.load(os.path.join(labels_dir, 'train_labels.npy'))
+    # test_labels = np.load(os.path.join(labels_dir, 'test_labels.npy'))
+    #
+    # train_names = []
+    # train_noises = []
+    # test_names = []
+    # test_noises = []
+    #
+    # idx_list = [0 for i in range(10)]
+    # noise_idx = 0
+    # for train_label in train_labels:
+    #     train_names.append(train_category[str(train_label)][idx_list[train_label]])
+    #     idx_list[train_label] += 1
+    #     idx_list[train_label] %= 150
+    #
+    #     train_noises.append(train_noise_names[noise_idx])
+    #     noise_idx += 1
+    #     noise_idx %= 40
+    #
+    # idx_list = [0 for i in range(10)]
+    # noise_idx = 0
+    # for test_label in test_labels:
+    #     test_names.append(test_category[str(test_label)][idx_list[test_label]])
+    #     idx_list[test_label] += 1
+    #     idx_list[test_label] %= 50
+    #
+    #     test_noises.append(test_noise_names[noise_idx])
+    #     noise_idx += 1
+    #     noise_idx %= 10
+    #
+    # names = train_names + test_names
+    # noises = train_noises + test_noises
 
     # 50 noise files
     train_noise_names = noise_names[:40]
@@ -179,15 +251,17 @@ def dir_to_spectrogram(audio_dir, saving_dir, noise_dir, labels_dir, num_process
 
     train_category = {str(i): list() for i in range(10)}
     test_category = {str(i): list() for i in range(10)}
+
+    test_wav_idx = [i for i in range(40, 50)]
     for file_name in file_names:
-        if test_speaker in file_name:
-            test_category[file_name[0]].append(file_name)
-        else:
+        idx = file_name.rfind('_') + 1
+        if int(file_name[idx:-4]) not in test_wav_idx:
             train_category[file_name[0]].append(file_name)
+        else:
+            test_category[file_name[0]].append(file_name)
 
     train_labels = np.load(os.path.join(labels_dir, 'train_labels.npy'))
     test_labels = np.load(os.path.join(labels_dir, 'test_labels.npy'))
-
     train_names = []
     train_noises = []
     test_names = []
@@ -198,7 +272,7 @@ def dir_to_spectrogram(audio_dir, saving_dir, noise_dir, labels_dir, num_process
     for train_label in train_labels:
         train_names.append(train_category[str(train_label)][idx_list[train_label]])
         idx_list[train_label] += 1
-        idx_list[train_label] %= 150
+        idx_list[train_label] %= 160
 
         train_noises.append(train_noise_names[noise_idx])
         noise_idx += 1
@@ -209,7 +283,7 @@ def dir_to_spectrogram(audio_dir, saving_dir, noise_dir, labels_dir, num_process
     for test_label in test_labels:
         test_names.append(test_category[str(test_label)][idx_list[test_label]])
         idx_list[test_label] += 1
-        idx_list[test_label] %= 50
+        idx_list[test_label] %= 40
 
         test_noises.append(test_noise_names[noise_idx])
         noise_idx += 1
@@ -237,6 +311,7 @@ def dir_to_spectrogram(audio_dir, saving_dir, noise_dir, labels_dir, num_process
 
     train_data = data[:60000]
     test_data = data[60000:]
+    print(data.shape)
     np.save(os.path.join(saving_dir, 'train_data.npy'), train_data)
     np.save(os.path.join(saving_dir, 'test_data.npy'), test_data)
 
@@ -253,10 +328,13 @@ def get_noise_names(noise_dir):
 
 
 def audio_gen(audio_dir='./raw_data/FSDD/', saving_dir='./avmnist/audio',
-              noise_dir='./raw_data/ESC-50/', noise_power=0.009, labels_dir='./avmnist/'):
+              noise_dir='./raw_data/ESC-50/', noise_power=0, labels_dir='./avmnist/'):
     working_dir = os.getcwd()
+    # note that the size of the spectrogram array is not (112, 112),
+    # but the spectrum size is (112, 112).
+    # read the doc of plt.specgram()
     dir_to_spectrogram(os.path.join(working_dir, audio_dir), os.path.join(working_dir, saving_dir),
-                       os.path.join(working_dir, noise_dir), labels_dir, f_length=112, t_length=112, num_processes=12,
+                       os.path.join(working_dir, noise_dir), labels_dir, f_length=112, t_length=112, num_processes=23,
                        noise_power=noise_power)
 
 
